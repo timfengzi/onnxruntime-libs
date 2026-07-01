@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - update-ohos
+      - sdk-4.1
   workflow_dispatch:
     inputs:
       version:
-        description: "Version information (e.g., 1.26.0)"
+        description: "Version information (e.g., 1.27.0)"
         required: true
 
 permissions:
@@ -16,11 +17,12 @@ permissions:
 # commandline-tools-linux-x64-5.0.3.906.zip supports only onnxruntime<=1.16.3
 # since its clang is 15.0.4 and does not support bfloat16_t
 #
+# See https://github.com/openharmony-rs/ohos-sdk/releases
 
 env:
   ONNXRUNTIME_VERSION:
     |- # Enter release tag name or version name in workflow_dispatch. Appropriate version if not specified
-    ${{ github.event.release.tag_name || github.event.inputs.version || '1.26.0' }}
+    ${{ github.event.release.tag_name || github.event.inputs.version || '1.27.0' }}
 
 jobs:
   harmony-os-shared:
@@ -31,7 +33,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         arch: [arm64-v8a, armeabi-v7a, x86_64]
-        # arch: [arm64-v8a]
+        # arch: [armeabi-v7a]
 
     steps:
       - name: Setup Python 3.10
@@ -44,9 +46,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: onnxruntime-ohos-${{ matrix.arch }}-${{ env.ONNXRUNTIME_VERSION }}
-          key: onnxruntime-ohos-${{ matrix.arch }}-${{ env.ONNXRUNTIME_VERSION }}-cache-v906
+          key: onnxruntime-ohos-${{ matrix.arch }}-${{ env.ONNXRUNTIME_VERSION }}-cache-v2026-06-30
 
       - name: cache-toolchain (CPU)
+        if: false
         id: cache-toolchain
         uses: actions/cache@v4
         with:
@@ -54,6 +57,72 @@ jobs:
           key: commandline-tools-linux-x64-5.0.3.906.zip
           # key: commandline-tools-linux-x64-5.0.5.200.zip
           # key: commandline-tools-linux-x64-6.0.1.251.zip
+
+      - name: Download toolchain
+        if: false
+        # if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          v=6.0.1.251
+          v=5.0.3.906
+          curl -SL -O https://huggingface.co/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-$v.zip
+          unzip commandline-tools-linux-x64-$v.zip
+          rm commandline-tools-linux-x64-$v.zip
+
+      - name: cache-toolchain (CPU)
+        id: cache-toolchain-2
+        uses: actions/cache@v4
+        with:
+          path: command-line-tools
+          key: ohos-sdk-windows_linux-public-4.0.0
+          # key: ohos-sdk-windows_linux-public-5.0.0
+
+      - name: Download toolchain
+        if: steps.cache-toolchain-2.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          # https://laval.csdn.net/67d247833b685529b70a2a54.html
+          # https://github.com/openharmony-rs/ohos-sdk/releases
+
+          curl -L -O https://github.com/openharmony-rs/ohos-sdk/releases/download/v4.1/ohos-sdk-windows_linux-public.tar.gz.aa
+          curl -L -O https://github.com/openharmony-rs/ohos-sdk/releases/download/v4.1/ohos-sdk-windows_linux-public.tar.gz.ab
+
+          cat ohos-sdk-windows_linux-public.tar.gz.aa ohos-sdk-windows_linux-public.tar.gz.ab > ohos-sdk-windows_linux-public.tar.gz
+          tar -xzf ohos-sdk-windows_linux-public.tar.gz
+          rm ohos-sdk-windows_linux-public.tar.gz*
+
+          cd ohos-sdk
+
+          echo "---linux---"
+          ls -lh linux
+
+          echo "---windows---"
+          ls -lh windows
+
+          pushd linux/
+          # unzip native-linux-x64-5.0.0.71-Release.zip
+          unzip native-linux-x64-4.1.7.5-Release.zip
+          ls -lh native
+          popd
+
+          cd ..
+
+          dst=command-line-tools/sdk/default/openharmony
+          mkdir -p $dst
+
+          mv ohos-sdk/linux/native $dst
+
+          rm -rf ohos-sdk
+
+          ls
+
+          echo "---"
+
+          ls -lh $dst/
+
+      - name: Setup tmate session
+        if: failure()
+        uses: mxschmitt/action-tmate@v3
 
       - name: Checkout v${{ env.ONNXRUNTIME_VERSION }}
         # if: steps.cache-build-result.outputs.cache-hit != 'true'
@@ -64,22 +133,9 @@ jobs:
           ref: v${{ env.ONNXRUNTIME_VERSION }}
           path: ./onnxruntime
 
-      - name: Download toolchain
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          v=6.0.1.251
-          v=5.0.3.906
-          curl -SL -O https://huggingface.co/csukuangfj/harmonyos-commandline-tools/resolve/main/commandline-tools-linux-x64-$v.zip
-          unzip commandline-tools-linux-x64-$v.zip
-          rm commandline-tools-linux-x64-$v.zip
-
       - name: Set environment variable
         shell: bash
         run: |
-          echo "$GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build-tools/cmake/bin"  >> "$GITHUB_PATH"
-          which cmake
-
           cmake --version
 
           ls -lh $GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build/cmake/ohos.toolchain.cmake
@@ -124,6 +180,7 @@ jobs:
         run: |
           cd onnxruntime
           pushd cmake
+
           sed -i.bak '/SOVERSION/d' ./onnxruntime.cmake
           sed -i.bak '/onnxruntime PROPERTIES VERSION/d' ./onnxruntime.cmake
 
@@ -151,6 +208,7 @@ jobs:
             echo "unknown arch $arch"
             exit 1
           fi
+
 
           echo 'set(CMAKE_SYSTEM_NAME Linux CACHE STRING "" FORCE)' | cat - CMakeLists.txt > a.txt
           mv a.txt CMakeLists.txt
@@ -239,18 +297,127 @@ jobs:
 
           sudo apt-get install -y patchelf
 
+      - name: Patch model_editor_c_api for Clang 15
+        shell: bash
+        run: |
+          target_file=$GITHUB_WORKSPACE/onnxruntime/onnxruntime/core/session/model_editor_c_api.cc
+
+          echo "--- Patching model_editor_c_api.cc ---"
+
+          # 1. 修复 OrtModelEditorAPI::AddInitializerToGraph 中的结构化绑定 (约332行-348行)
+          sed -i 's/auto \[ptr_it, ptr_inserted\] = graph->initializer_ptrs.insert(tensor);/auto insert_res_1 = graph->initializer_ptrs.insert(tensor); auto ptr_it = insert_res_1.first; auto ptr_inserted = insert_res_1.second;/g' $target_file
+
+          # 2. 修复 OrtModelEditorAPI::AddNodeToGraph 中的结构化绑定 (约384行-399行)
+          sed -i 's/auto \[ptr_it, ptr_inserted\] = graph->node_ptrs.insert(node);/auto insert_res_2 = graph->node_ptrs.insert(node); auto ptr_it = insert_res_2.first; auto ptr_inserted = insert_res_2.second;/g' $target_file
+
+          echo "--- Patch applied successfully ---"
+
+          cd onnxruntime
+
+          git diff .
+
       - name: Patch toolchain file
         shell: bash
         run: |
-          sed -i.bak s/CMAKE_SYSTEM_NAME\ OHOS/CMAKE_SYSTEM_NAME\ Linux/g $GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build/cmake/ohos.toolchain.cmake
+          toolchain_file=$GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build/cmake/ohos.toolchain.cmake
+          sed -i.bak 's/set(UNIX TRUE CACHE BOOL FROCE)/set(UNIX TRUE CACHE BOOL "Force UNIX" FORCE)/g' $toolchain_file
+
+          sed -i.bak s/CMAKE_SYSTEM_NAME\ OHOS/CMAKE_SYSTEM_NAME\ Linux/g $toolchain_file
           # Add __OHOS__ define to the toolchain so all source files see it
-          sed -i.bak 's/set(CMAKE_C_FLAGS "${OHOS_C_COMPILER_FLAGS} ${CMAKE_C_FLAGS} -D__MUSL__")/set(CMAKE_C_FLAGS "${OHOS_C_COMPILER_FLAGS} ${CMAKE_C_FLAGS} -D__MUSL__ -D__OHOS__")/' $GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build/cmake/ohos.toolchain.cmake
-          sed -i.bak 's/set(CMAKE_CXX_FLAGS "${OHOS_CXX_COMPILER_FLAGS} ${CMAKE_CXX_FLAGS} -D__MUSL__")/set(CMAKE_CXX_FLAGS "${OHOS_CXX_COMPILER_FLAGS} ${CMAKE_CXX_FLAGS} -D__MUSL__ -D__OHOS__")/' $GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build/cmake/ohos.toolchain.cmake
+          sed -i.bak 's/set(CMAKE_C_FLAGS "${OHOS_C_COMPILER_FLAGS} ${CMAKE_C_FLAGS} -D__MUSL__")/set(CMAKE_C_FLAGS "${OHOS_C_COMPILER_FLAGS} ${CMAKE_C_FLAGS} -D__MUSL__ -D__OHOS__")/' $toolchain_file
+          sed -i.bak 's/set(CMAKE_CXX_FLAGS "${OHOS_CXX_COMPILER_FLAGS} ${CMAKE_CXX_FLAGS} -D__MUSL__")/set(CMAKE_CXX_FLAGS "${OHOS_CXX_COMPILER_FLAGS} ${CMAKE_CXX_FLAGS} -D__MUSL__ -D__OHOS__")/' $toolchain_file
 
           echo "---"
           cat $GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native/build/cmake/ohos.toolchain.cmake
 
       - name: Build onnxruntime ${{ env.ONNXRUNTIME_VERSION }}
+        shell: bash
+        run: |
+          cd onnxruntime
+          build_dir=./build-shared
+          mkdir $build_dir
+
+          export OHOS_SDK_NATIVE_DIR=$GITHUB_WORKSPACE/command-line-tools/sdk/default/openharmony/native
+
+          arch=${{ matrix.arch }}
+          if [[ $arch == "arm64-v8a" ]]; then
+            CMAKE_SYSTEM_PROCESSOR=aarch64
+            # 显式加入 -Wa,-mrelax-relocations=no=false 强行覆盖，或者直接置空
+            export GLOBAL_FLAGS="-O3 -Wno-unused-parameter -Wno-unused-command-line-argument"
+          elif [[ $arch == "armeabi-v7a" ]]; then
+            CMAKE_SYSTEM_PROCESSOR=armv7
+            export GLOBAL_FLAGS="-O3 -mfloat-abi=softfp -mfpu=neon -Wno-unused-parameter -Wno-unused-command-line-argument"
+          elif [[ $arch == "x86_64" ]]; then
+            CMAKE_SYSTEM_PROCESSOR=x86_64
+            export GLOBAL_FLAGS="-O3 -Wno-unused-parameter -Wno-unused-command-line-argument"
+          fi
+
+          cd $build_dir
+
+          cmake \
+            -DCMAKE_TOOLCHAIN_FILE=$OHOS_SDK_NATIVE_DIR/build/cmake/ohos.toolchain.cmake \
+            -DOHOS_ARCH=$arch \
+            -DOHOS_PLATFORM=OHOS \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=$CMAKE_SYSTEM_PROCESSOR \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=$build_dir \
+            -Donnxruntime_CROSS_COMPILING=ON \
+            -Donnxruntime_BUILD_SHARED_LIB=ON \
+            -DABSL_ENABLE_INSTALL=ON \
+            -DCMAKE_C_FLAGS="$GLOBAL_FLAGS" \
+            -DCMAKE_CXX_FLAGS="$GLOBAL_FLAGS" \
+            -DCMAKE_ASM_FLAGS="$GLOBAL_FLAGS" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-relax" \
+            -Donnxruntime_BUILD_UNIT_TESTS=OFF \
+            -DFETCHCONTENT_QUIET=OFF \
+            --compile-no-warning-as-error \
+            -Donnxruntime_RUN_ONNX_TESTS=OFF \
+            -Donnxruntime_GENERATE_TEST_REPORTS=OFF \
+            -Donnxruntime_USE_MIMALLOC=OFF \
+            -Donnxruntime_ENABLE_PYTHON=OFF \
+            -Donnxruntime_BUILD_CSHARP=OFF \
+            -Donnxruntime_BUILD_JAVA=OFF \
+            -Donnxruntime_BUILD_NODEJS=OFF \
+            -Donnxruntime_BUILD_OBJC=OFF \
+            -Donnxruntime_BUILD_APPLE_FRAMEWORK=OFF \
+            -Donnxruntime_USE_DNNL=OFF \
+            -Donnxruntime_USE_NNAPI_BUILTIN=OFF \
+            -Donnxruntime_USE_RKNPU=OFF \
+            -Donnxruntime_USE_LLVM=OFF \
+            -Donnxruntime_ENABLE_MICROSOFT_INTERNAL=OFF \
+            -Donnxruntime_USE_VITISAI=OFF \
+            -Donnxruntime_USE_TENSORRT=OFF \
+            -Donnxruntime_USE_TENSORRT_BUILTIN_PARSER=ON \
+            -Donnxruntime_USE_TVM=OFF \
+            -Donnxruntime_DISABLE_CONTRIB_OPS=OFF \
+            -Donnxruntime_DISABLE_ML_OPS=OFF \
+            -Donnxruntime_DISABLE_RTTI=OFF \
+            -Donnxruntime_DISABLE_EXCEPTIONS=OFF \
+            -Donnxruntime_MINIMAL_BUILD=OFF \
+            -Donnxruntime_USE_DML=OFF \
+            -Donnxruntime_USE_WINML=OFF \
+            -Donnxruntime_ENABLE_LTO=OFF \
+            -Donnxruntime_USE_ACL=OFF \
+            -Donnxruntime_USE_ARMNN=OFF \
+            -Donnxruntime_USE_JSEP=OFF \
+            -Donnxruntime_ENABLE_TRAINING=OFF \
+            -Donnxruntime_ENABLE_TRAINING_OPS=OFF \
+            -Donnxruntime_ENABLE_TRAINING_APIS=OFF \
+            -Donnxruntime_ENABLE_CPU_FP16_OPS=OFF \
+            -Donnxruntime_USE_NCCL=OFF \
+            -Donnxruntime_BUILD_BENCHMARKS=OFF \
+            -Donnxruntime_USE_ROCM=OFF \
+            -Donnxruntime_USE_MPI=OFF \
+            -Donnxruntime_USE_XNNPACK=OFF \
+            -Donnxruntime_USE_WEBNN=OFF \
+            -Donnxruntime_USE_CANN=OFF \
+            ../cmake
+
+          make -j2
+
+      - name: Build onnxruntime ${{ env.ONNXRUNTIME_VERSION }}
+        if: false
         # if: steps.cache-build-result.outputs.cache-hit != 'true'
         shell: bash
         run: |
@@ -426,10 +593,16 @@ jobs:
           tree ./$artifact
 
           file ./$artifact/lib/libonnxruntime.so
+          ls -lh ./$artifact/lib/libonnxruntime.so
 
           readelf -d ./$artifact/lib/libonnxruntime.so
 
           patchelf --set-soname libonnxruntime.so ./$artifact/lib/libonnxruntime.so
+
+          echo "---after patchelf"
+
+          readelf -d ./$artifact/lib/libonnxruntime.so
+          ls -lh ./$artifact/lib/libonnxruntime.so
 
           zip -r ${artifact}.zip ./$artifact
           mv *.zip ../
@@ -454,7 +627,7 @@ jobs:
 
       # https://huggingface.co/docs/hub/spaces-github-actions
       - name: Publish to huggingface
-        if: false
+        if: true
         # if: github.repository_owner == 'csukuangfj' && steps.cache-build-result.outputs.cache-hit != 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

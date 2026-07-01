@@ -62,11 +62,6 @@ jobs:
 
           sudo apt-get install -y patchelf
 
-          cd cmake
-          rm deps.txt
-          wget https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.17.1/deps.txt
-          git diff .
-
 
       - name: build
         if: steps.cache-build-result.outputs.cache-hit != 'true'
@@ -177,7 +172,16 @@ jobs:
         run: |
           version=${{ env.ONNXRUNTIME_VERSION }}
           d=onnxruntime-android-$version
-          wget -q https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/$version/$d.aar
+          wget -q https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/$version/$d.aar || \
+          wget -q https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.26.0/onnxruntime-android-1.26.0.aar
+          ls -lh *.aar
+
+          if [ -f onnxruntime-android-1.26.0.aar ]; then
+            mv -v onnxruntime-android-1.26.0.aar $d.aar
+          fi
+
+          ls -lh *.aar
+
           mkdir $d
           pushd $d
           unzip ../$d.aar
